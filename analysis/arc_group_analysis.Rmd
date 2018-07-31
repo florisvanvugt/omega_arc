@@ -1,0 +1,54 @@
+
+
+```{r}
+
+require('ggplot2')
+require('Rmisc')
+
+```
+
+```{r}
+
+alldata <- read.csv('interim/allsubjects.csv')
+
+unique(alldata$participant)
+
+```
+
+
+```{r}
+
+summ <- summarySE(alldata,'max.dist','cumul.trial',na.rm=T)
+
+```
+
+
+```{r}
+
+ggplot(summ,
+       aes(x=cumul.trial,
+           y=max.dist,
+           ymin=max.dist-se,
+           ymax=max.dist+se))+
+    geom_point()+
+    geom_ribbon()+
+    ylab("Maximum distance (cm)")
+    
+```
+
+
+
+```{r}
+
+persubj <- ddply(alldata,c('participant','block'),summarize,max.dist=mean(max.dist))
+summ <- summarySE(persubj,'max.dist','block',na.rm=T)
+
+ggplot(summ,
+       aes(x=block,
+           y=max.dist,
+           ymin=max.dist-se,
+           ymax=max.dist+se))+
+    geom_bar(stat='identity')+
+    geom_errorbar(width=0)
+
+```
