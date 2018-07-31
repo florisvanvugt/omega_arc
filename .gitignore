@@ -1,0 +1,6 @@
+*~
+simpleschedule.txt
+robot
+*.pyc
+calib*.pickle27
+.ipynb_checkpoints/
