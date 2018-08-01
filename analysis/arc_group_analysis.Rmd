@@ -1,9 +1,41 @@
+---
+title: "Arc-tracing Omega Experiment"
+output:
+  html_document:
+    toc: true
+    theme: united
+---
+
+Generated:
+
+```{r echo=FALSE}
+date()
+```
 
 
 ```{r}
 
-require('ggplot2')
-require('Rmisc')
+require(ggplot2)
+require(Rmisc)
+require(dplyr)
+library(plyr)
+require('reshape2')
+require('reshape')
+require('GGally')
+require('weights')
+require('ez')
+
+library('knitr')
+opts_chunk$set(fig.width=6,fig.height=4)
+#opts_chunk$set(dev='pdf')          #comment=NA, fig.width=6, fig.height=6)
+#opts_chunk$set(dev='png',dpi=300)  # high resolution
+opts_chunk$set(dev=c('png','pdf'),dpi=100)  # low resolution
+
+
+opts_chunk$set(fig.keep='all')
+opts_chunk$set(fig.path='figures/arcomega_')
+theme_set(theme_classic(base_family = "Helvetica")+
+          theme(axis.text = element_text(colour = "black")))
 
 ```
 
@@ -13,8 +45,59 @@ alldata <- read.csv('interim/allsubjects.csv')
 
 unique(alldata$participant)
 
+alldata$block <- factor(alldata$block,ordered=T)
+
 ```
 
+
+## Timing
+
+```{r}
+
+ninc <- ddply(alldata,c('participant','block'),
+              function(xx) {
+                  data.frame(n =nrow(xx),
+                             n.incomplete = sum(xx$timing=="incomplete.trial"))
+              })
+
+ninc$incomplete.perc <- ninc$n.incomplete/ninc$n
+
+```
+
+```{r label=prop_incomplete,fig.width=4,fig.height=4}
+
+ggplot(ninc,
+       aes(x=block,
+           y=incomplete.perc,
+           group=participant,colour=participant))+
+    geom_point()+
+    geom_line()+
+    ylab("Proportion incomplete trials")
+
+```
+
+
+### Duration
+
+```{r label=duration,fig.width=5,fig.height=4}
+
+summ <- summarySE(alldata,'duration','cumul.trial',na.rm=T)
+
+ggplot(summ,
+       aes(x=cumul.trial,
+           y=duration,
+           ymin=duration-se,
+           ymax=duration+se))+
+    geom_point()+
+    geom_ribbon()
+
+```
+
+
+
+
+
+## Distance to arc
 
 ```{r}
 
@@ -23,7 +106,7 @@ summ <- summarySE(alldata,'max.dist','cumul.trial',na.rm=T)
 ```
 
 
-```{r}
+```{r label=maxdist,fig.height=4,fig.width=4}
 
 ggplot(summ,
        aes(x=cumul.trial,
@@ -38,17 +121,86 @@ ggplot(summ,
 
 
 
-```{r}
+```{r label=maxdist_persubj,fig.height=4,fig.width=4}
 
-persubj <- ddply(alldata,c('participant','block'),summarize,max.dist=mean(max.dist))
+persubj <- ddply(alldata,
+                 c('participant','block'),
+                 function(xx) {
+                     data.frame(max.dist=mean(xx$max.dist,na.rm=T))
+                     })
+
+ggplot(persubj,
+       aes(x=block,
+           y=max.dist,
+           colour=participant,
+           group=participant))+
+    geom_line()+
+    geom_point()
+
+
+```
+
+
+```{r label=maxdist_summ,fig.width=4,fig.height=4}
+
 summ <- summarySE(persubj,'max.dist','block',na.rm=T)
 
 ggplot(summ,
        aes(x=block,
            y=max.dist,
            ymin=max.dist-se,
-           ymax=max.dist+se))+
-    geom_bar(stat='identity')+
+           ymax=max.dist+se,
+           group=1))+
+    geom_line()+
     geom_errorbar(width=0)
 
 ```
+
+
+
+
+
+
+## Speed-accuracy trade-off?
+
+```{r}
+
+ggplot(alldata,
+       aes(x=duration,
+           y=max.dist))+
+    geom_point()+
+    geom_smooth(method='lm')+
+    facet_wrap(~participant)
+
+```
+
+
+```{r}
+
+ggplot(alldata,
+       aes(x=duration,
+           y=max.dist,
+           colour=block,group=block))+
+    geom_point()+
+    geom_smooth(method='lm')+
+    facet_wrap(~participant)
+
+```
+
+
+```{r label=speedacc_persubj,fig.height=7,fig.width=7}
+
+ggplot(subset(alldata,block%in%c("1","4")),
+       aes(x=duration,
+           y=max.dist,
+           colour=block,group=block))+
+    geom_point()+
+    geom_smooth(method='lm')+
+    facet_wrap(~participant)+
+    scale_colour_hue(l=30)
+
+```
+
+
+
+
