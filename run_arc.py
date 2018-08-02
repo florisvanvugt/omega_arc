@@ -23,6 +23,8 @@ import subprocess
 
 from Tkinter import * # use for python2
 import tkMessageBox
+import tkSimpleDialog
+
 
 import json
 
@@ -89,7 +91,7 @@ conf["TARGET_AREA"] = conf["TARGET_RADIUS"]
 
 
 # How long the cursor needs to be in the target in order for the trial to end (in seconds)
-conf["IN_TARGET_TIME"] = .15
+conf["IN_TARGET_TIME"] = .10
 
 
 # How long the robot will take to place the subject in the start position
@@ -214,8 +216,9 @@ conf["TARGET_ON_TIME_COLOUR"] = (0,255,0)
 # Of course, that makes a big difference. We should decide what we want to do.
 #conf["ROTATION_PIVOT"] = "starting.point"
 
-conf["RIGHT_ARC_ORIGIN"] = (conf["ARC_BASE_X"]+2*conf["ARC_RADIUS_2"],conf["ARC_BASE_Y"]) #(conf["CENTERX"]+conf["ARC_RADIUS"],conf["CENTERY"])
-conf["LEFT_ARC_ORIGIN"]  = (conf["ARC_BASE_X"]-2*conf["ARC_RADIUS_1"],conf["ARC_BASE_Y"]) #conf(conf["CENTERX"]-conf["ARC_RADIUS"],conf["CENTERY"])
+# Now {LEFT,RIGHT}_ORIGIN encodes the position of the starting and end points
+conf["RIGHT_ORIGIN"] = (conf["ARC_BASE_X"]+2*conf["ARC_RADIUS_2"],conf["ARC_BASE_Y"]) #(conf["CENTERX"]+conf["ARC_RADIUS"],conf["CENTERY"])
+conf["LEFT_ORIGIN"]  = (conf["ARC_BASE_X"]-2*conf["ARC_RADIUS_1"],conf["ARC_BASE_Y"]) #conf(conf["CENTERX"]-conf["ARC_RADIUS"],conf["CENTERY"])
 conf["CENTER_ARC_ORIGIN"]=(conf["ARC_BASE_X"],conf["ARC_BASE_Y"])
 
 # Demonstration = The ideal trajectory
@@ -327,47 +330,6 @@ def draw_cursor(surface,pos):
     pygame.draw.ellipse(surface,conf["CURSOR_COLOUR"],
                         [minx,miny,maxx-minx,maxy-miny])
 
-
-
-def draw_demonstration(experiment,trialdata):
-    global conf
-
-    # Start with an empty screen
-    # (like in Zen drawing, the most beautiful is an empty page)
-    experiment.screen.fill(conf["BGCOLOR"])
-
-
-    # Draw the arc that marks the path to be followed
-    draw_arc(experiment.screen) #,trialdata["direction"]=="left")
-
-    # Draw the target ball
-    draw_ball(experiment.screen,trialdata["target.position"],conf["ARC_COLOUR"])
-
-    # Draw the starting ball
-    draw_ball(experiment.screen,trialdata["start.position"],conf["ARC_COLOUR"])
-
-    if (trialdata["t.current"]<=(trialdata["t.demo"]+trialdata["t.stay"])/2):
-        ang=0
-        tx=conf["ARC_BASE_X"]-conf["ARC_RADIUS_1"]-conf["ARC_RADIUS_1"]*np.cos(ang)
-        ty=conf["ARC_BASE_Y"]+conf["ARC_RADIUS_1"]*np.sin(ang)
-
-
-    elif (trialdata["t.current"]<=(3*trialdata["t.demo"]+trialdata["t.stay"])/4):
-        ang=(4*np.pi/conf["DEMO_TIME"])*trialdata["t.current"]+-2*np.pi*(trialdata["t.demo"]+trialdata["t.stay"])/conf["DEMO_TIME"]
-        tx=conf["ARC_BASE_X"]-conf["ARC_RADIUS_1"]-conf["ARC_RADIUS_1"]*np.cos(ang)
-        ty=conf["ARC_BASE_Y"]+conf["ARC_RADIUS_1"]*np.sin(ang)
-
-    else :
-        ang=(4*np.pi/conf["DEMO_TIME"])*trialdata["t.current"]-np.pi*(3*trialdata["t.demo"]+trialdata["t.stay"])/conf["DEMO_TIME"]
-        tx=conf["ARC_BASE_X"]+conf["ARC_RADIUS_2"]-conf["ARC_RADIUS_2"]*np.cos(ang)
-        ty=conf["ARC_BASE_Y"]-conf["ARC_RADIUS_2"]*np.sin(ang)
-
-    conf["CURSOR_RADIUS"]*=2
-    conf["CURSOR_COLOUR"]=(255,0,0)
-    draw_cursor(experiment.screen,(tx,ty))
-    conf["CURSOR_RADIUS"]*=0.5
-    conf["CURSOR_COLOUR"]=(0,0,0)
-    pygame.display.flip()
 
 
 
@@ -524,6 +486,12 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         pickle.dump(experiment.captured,open(experiment.capturelog,'wb'))
 
         close_logs() # at the end of a run
+
+        # Now ask the experimenter for observations
+        obsv = tkSimpleDialog.askstring('Please record any observations', 'Experimenter, please write down any observations.\nAny irregularities?\nDid the subject seem concentrated or not?\nWere things unclear or clear?\nAnything else that is worth noting?')
+        with open(experiment.obsvlog,'w') as f:
+            f.write(obsv)
+        
         tkMessageBox.showinfo("Robot", "Block completed! Yay!")
         trialdata["t.trial.finish"]=np.inf # that's the end folks!
         experiment.keep_going = False
@@ -536,8 +504,8 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
 
         #conf["ARC_RADIUS_1"] = random.randint(1,2000)/100000
         #conf["ARC_RADIUS_2"] = random.randint(1,2000)/100000
-        #conf["RIGHT_ARC_ORIGIN"] = (conf["ARC_BASE_X"]+2*conf["ARC_RADIUS_2"],conf["ARC_BASE_Y"])
-        #conf["LEFT_ARC_ORIGIN"]  = (conf["ARC_BASE_X"]-2*conf["ARC_RADIUS_1"],conf["ARC_BASE_Y"])
+        #conf["RIGHT_ORIGIN"] = (conf["ARC_BASE_X"]+2*conf["ARC_RADIUS_2"],conf["ARC_BASE_Y"])
+        #conf["LEFT_ORIGIN"]  = (conf["ARC_BASE_X"]-2*conf["ARC_RADIUS_1"],conf["ARC_BASE_Y"])
 
 
         tcurrent  = trialdata["t.current"]
@@ -570,9 +538,9 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
 
 
         if trialdata["direction"]=="right":
-            target_position,startpos = conf["RIGHT_ARC_ORIGIN"],conf["LEFT_ARC_ORIGIN"]
+            target_position,startpos = conf["RIGHT_ORIGIN"],conf["LEFT_ORIGIN"]
         else: # if direction==left
-            target_position,startpos = conf["LEFT_ARC_ORIGIN"],conf["RIGHT_ARC_ORIGIN"]
+            target_position,startpos = conf["LEFT_ORIGIN"],conf["RIGHT_ORIGIN"]
 
 
         (ry,rz) = startpos
@@ -596,15 +564,9 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
 
         t = tcurrent
 
-        if (conf["DEMO_FLAG"]==False):
-            trialdata["t.stay"]         = t+conf["RETURN_TIME"] # when to start staying and fading
-            trialdata["t.go"]           = t+conf["RETURN_TIME"]+conf["FADE_TIME"] # when to give the go signal
-            trialdata["t.trial.finish"] = t+10*conf["MAX_TRIAL_TIME"] # when the trial will end
-        else :
-            trialdata["t.stay"]         = t+conf["RETURN_TIME"] # when to start staying and fading
-            trialdata["t.demo"]         = t+conf["DEMO_TIME"]+conf["RETURN_TIME"]
-            trialdata["t.go"]           = t+conf["DEMO_TIME"]+conf["RETURN_TIME"]+conf["FADE_TIME"] # when to give the go signal
-            trialdata["t.trial.finish"] = t+conf["DEMO_TIME"]+10*conf["MAX_TRIAL_TIME"] # when the trial will end
+        trialdata["t.stay"]         = t+conf["RETURN_TIME"] # when to start staying and fading
+        trialdata["t.go"]           = t+conf["RETURN_TIME"]+conf["FADE_TIME"] # when to give the go signal
+        trialdata["t.trial.finish"] = t+10*conf["MAX_TRIAL_TIME"] # when the trial will end
 
         trialdata["t.start"]        = t
         trialdata["t.current"]      = t
@@ -659,7 +621,8 @@ def init_logs(experiment,conf):
     capturelog = '%scaptured.pickle27'%basename
     ##trajlog.write('participant experiment trial x y dx dy t t.absolute\n')
 
-
+    obsvlog    = '%sobservations.txt'%basename
+    
     triallog = open('%strials.txt'%basename,'w')
     triallog.write('participant experiment trial rotation target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration\n')
 
@@ -689,9 +652,10 @@ def init_logs(experiment,conf):
 
 
 
-    experiment.trajlog  = trajlog
-    experiment.triallog = triallog
-    experiment.capturelog=capturelog
+    experiment.trajlog   = trajlog
+    experiment.triallog  = triallog
+    experiment.capturelog= capturelog
+    experiment.obsvlog   = obsvlog
     #experiment.normlog  = normlog
     #experiment.trlog    = trlog
 
@@ -822,7 +786,7 @@ def load_robot():
     #robot.release()
     gui["loaded"]=True
     update_ui()
-    tkMessageBox.showinfo("Robot", "The robot will move to the initial position\n\n Take your time to find the best position for your arm")
+    tkMessageBox.showinfo("Robot", "Experimenter, enable the forces on the robot!\n\nNow tell the subject the robot will move to the initial position\n\n Take your time to find the best position for your arm.")
     robot.move_to(0,conf["ARC_BASE_X"],conf["ARC_BASE_Y"],conf["RETURN_TIME"])
     while (robot.move_is_done() == False):
         pass  #wait until the end of the movement
@@ -854,10 +818,11 @@ def decide_timing(trialdata):
     ## Decide how long this trial's movement was.
     dtime = trialdata["t.trial.end"]-trialdata["t.movestart"]
     trialdata["duration"]=dtime
-    if dtime<conf["MIN_MOVEMENT_TIME"]:
-        trialdata["timing"]="too_fast"
-    if dtime>conf["MAX_MOVEMENT_TIME"]:
-        trialdata["timing"]="too_slow"
+    #if dtime<conf["MIN_MOVEMENT_TIME"]:
+    #    trialdata["timing"]="too_fast"
+    #if dtime>conf["MAX_MOVEMENT_TIME"]:
+    #    trialdata["timing"]="too_slow"
+    trialdata["timing"]="ok"
 
 
 
@@ -869,10 +834,6 @@ def run():
         return
 
     global conf
-
-    print("Running the experiment.")
-    gui["running"]=True
-    update_ui()
 
     participant=gui["subject.id"].get().strip()
     if participant=="":
@@ -902,6 +863,10 @@ def run():
     experiment.inputs = robot
 
 
+    print("Running the experiment.")
+    gui["running"]=True
+    update_ui()
+
 
     trialdata = {"trial.number"    :0,
                  "experiment"      :EXPERIMENT,
@@ -910,8 +875,8 @@ def run():
                  "cursor.position" :(np.nan,np.nan),
                  "t.start"         :np.nan,
                  "t.trial.finish"  :-np.inf,
-                 "target.position" :conf["RIGHT_ARC_ORIGIN"],
-                 "start.position"  :conf["LEFT_ARC_ORIGIN"]}
+                 "target.position" :conf["RIGHT_ORIGIN"],
+                 "start.position"  :conf["LEFT_ORIGIN"]}
 
 
     ##center_trackball(experiment)
@@ -922,7 +887,7 @@ def run():
 
     draw_positions(experiment,trialdata)
     pygame.display.flip()
-    redraw_demo = False
+    #redraw_demo = False
 
     experiment.keep_going = True
     while experiment.keep_going:
@@ -943,8 +908,8 @@ def run():
 
                 print("Forcing trial end.")
                 print("Aborting trial because this takes too long.")
-                redraw = True
-                conf["ABORTED"]=True
+                redraw          = True
+                conf["ABORTED"] = True
 
                 trialdata["t.target.enter"]       = np.nan
                 trialdata["t.trial.end"]          = trialdata["t.current"]
@@ -957,43 +922,28 @@ def run():
                 robot.stay() # stop the subject in their tracks
                 finish_trial(experiment,trialdata)
 
-        if trialdata["phase"]=="return" and trialdata['t.current']>trialdata['t.stay'] and conf["DEMO_FLAG"]:
-            trialdata["phase"]="demo"
-            redraw_demo = True
-            print "Demonstration"
+        #if trialdata["phase"]=="return" and trialdata['t.current']>trialdata['t.stay'] and conf["DEMO_FLAG"]:
+        #    trialdata["phase"]="demo"
+        #    redraw_demo = True
+        #    print "Demonstration"
 
-        if trialdata["phase"]=="demo" and trialdata['t.current']>trialdata['t.demo']:
-            redraw_demo = False
-            conf["ITERATOR_DEMONSTRATION"]=0
-            trialdata["phase"]="stay"
-            y,z=trialdata['start.position']
-            print("Staying fading at %f,%f"%(y,z))
-            robot.start_capture()
-            robot.active_to_null()
-            while (robot.move_is_done() == False):
-                pass  #wait until the end of the movement
-            robot.three_d_to_two_d()
+        #if trialdata["phase"]=="demo" and trialdata['t.current']>trialdata['t.demo']:
+        #    redraw_demo = False
+        #    conf["ITERATOR_DEMONSTRATION"]=0
+        #    trialdata["phase"]="stay"
 
 
         # Is it time to start holding the robot at the center?
-        if trialdata['phase']=='return' and trialdata['t.current']>trialdata['t.stay']and not conf["DEMO_FLAG"]:
+        if trialdata['phase']=='return' and trialdata['t.current']>trialdata['t.stay']:
             trialdata['phase']='stay'
-            y,z=trialdata['start.position']
-            print("Staying fading at %f,%f"%(y,z))
+            print("Fading...")
             robot.start_capture()
             robot.active_to_null()
-            while (robot.move_is_done() == False):
-                pass  #wait until the end of the movement
-            robot.three_d_to_two_d()
 
         if trialdata['phase']=='stay' and trialdata['t.current']>trialdata['t.go']:
             print("Go!")
             trialdata['phase']='active' # go! start showing the cursor and let's move
-
-            #robot.wshm('fvv_trial_phase',4) # go signal is there, but subject has not necessarily started moving
-            #robot.move_phase_and_capture()
-
-
+            robot.three_d_to_two_d()
             redraw = True # because if no visual fb, we should at least show the cursor
 
 
@@ -1007,10 +957,7 @@ def run():
 
 
         if trialdata['phase']=='null' and trialdata["t.current"]>=trialdata["t.trial.finish"]:
-            if trialdata["trial.number"]%6==0 :
-                conf["DEMO_FLAG"]=True
-            else :
-                conf["DEMO_FLAG"]=False
+
             # Start a new trial (or stop if there is nothing more to be done)
             trialdata = start_new_trial(experiment,trialdata)
 
@@ -1021,11 +968,9 @@ def run():
 
 
 
-
-
         # Get current position from the robot
         pos = robot.rshm('y'),robot.rshm('z')
-        if trialdata["phase"]!="demo" and trialdata["phase"]!="return" and trialdata["phase"]!="null":
+        if trialdata["phase"]!="return" and trialdata["phase"]!="null":
             # If we are in the "go" phase, start allowing cursor movement
             # If we are not, simply discard
             if trialdata["phase"]=="active": #and trialdata["t.current"]>trialdata["t.start"]+trialdata["t.go"]:
@@ -1041,7 +986,7 @@ def run():
 
         if trialdata["phase"]=="active":
             # Decide whether we have reached the outside of the circle; if so, trial ends
-            dfromcenter = np.sqrt(sum((np.array(trialdata["cursor.position"])-np.array(trialdata["cursor.start"]))**2))
+            dfromstart = np.sqrt(sum((np.array(trialdata["cursor.position"])-np.array(trialdata["cursor.start"]))**2))
 
             dtotarget = np.sqrt(sum((np.array(trialdata["cursor.position"])-np.array(trialdata["target.position"]))**2))
             # Determine whether we are inside the target area.
@@ -1049,24 +994,27 @@ def run():
             # experiment.
 
             # Determine the distance to the target; if they are close enough, flag that they have entered the target
-            in_target = dtotarget<conf["TARGET_AREA"]
-            if dfromcenter>conf["MOVE_START_RADIUS"]:
+            in_target = dtotarget  < conf["TARGET_AREA"]
+            in_start  = dfromstart < conf["MOVE_START_RADIUS"]
+            if in_start:
+                trialdata["t.movestart"]    = None; # This way, if you go back to the starting point, you effectively reset the trial
+                trialdata["t.trial.finish"] = np.inf;
+                
+            else: # if not in start
+
                 # If we have moved far enough from the center to consider that the shooting movement has started.
                 if trialdata["t.movestart"]==None:
 
                     # Movement has started
-                    trialdata["t.movestart"] = trialdata["t.current"]
+                    trialdata["t.movestart"]    = trialdata["t.current"]
                     trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
                     redraw = True
-
-                    #robot.wshm('fvv_trial_phase',5) # signal that we could start watching the velocity
-
 
 
 
                 if experiment.visualfb:
                     if in_target:
-                        if trialdata["t.target.enter"]==None:
+                        if trialdata["t.target.enter"]==None: # if we have already previously entered the target
                             trialdata["t.target.enter"]=trialdata["t.current"]
                         else:
                             if trialdata["t.current"]-trialdata["t.target.enter"] > conf["IN_TARGET_TIME"]:
@@ -1090,30 +1038,6 @@ def run():
                         # If we are outside of the target, we need to reset the target enter time
                         trialdata["t.target.enter"]=None
 
-
-                #else: # if we are not in visual feedback mode
-
-                    # Here the logic is different, we wait for the robot to signal
-                    # to us that the trial should end because the subject
-                    # velocity is below a certain amount.
-
-                    #if robot.rshm('fvv_trial_phase')==6:
-
-                        #robot.stay()
-                        #robot.wshm('fvv_trial_phase',7) # mark that this trial is completed.
-                    #    print("no-visual mode: trial end signaled.")
-
-                        ##### Trial ending
-                        #decide_timing(trialdata)
-
-                        #trialdata["phase"]="feedback"
-                        #trialdata["show.feedback.until.t"] = trialdata["t.current"]+conf["FINAL_POSITION_SHOW_TIME"]
-
-
-                        #redraw = True
-
-                        ### Wrap up the rest of the trial
-                        #finish_trial(experiment,trialdata)
 
 
 
@@ -1141,15 +1065,16 @@ def run():
                     pygame.image.save(experiment.screen,'screenshot.bmp')
                     subprocess.call(['convert','screenshot.bmp',
                                      #'-crop','800x500+600+200',
-                                     '-flip','-resize','400x250','screenshot.gif'])
+                                     #'-flip',
+                                     '-resize','400x250','screenshot.gif'])
                     trialdata['saved']=True
 
                     gui["photo"]=PhotoImage(file='screenshot.gif')
                     gui["photolabel"].configure(image=gui["photo"])
 
 
-        if redraw_demo :
-            draw_demonstration(experiment, trialdata)
+        #if redraw_demo :
+        #    draw_demonstration(experiment, trialdata)
 
 
         master.update_idletasks()
@@ -1177,7 +1102,7 @@ def init_tk():
 
     gui["subject.id"] = StringVar()
     l      = Label(f, text="subject ID",             fg="white", bg="black")
-    subjid = Entry(f, textvariable=gui["subject.id"],fg="white", bg="black")
+    subjid = Entry(f, textvariable=gui["subject.id"],fg="white", bg="black",insertbackground='yellow')
 
     row  = 0
     f.grid         (row=row,padx=10,pady=10)
@@ -1192,7 +1117,7 @@ def init_tk():
     gui["schedulef"]  = StringVar()
     gui["schedulef"].set("simpleschedule.txt")
     l      = Label(f, text="schedule file",          fg="white", bg="black")
-    e      = Entry(f, textvariable=gui["schedulef"], fg="white", bg="black")
+    e      = Entry(f, textvariable=gui["schedulef"], fg="white", bg="black",insertbackground='yellow')
     l.grid(row=row,column=0,sticky=W,pady=10)
     e.grid(row=row,column=1,sticky=W,padx=10)
 
@@ -1254,7 +1179,7 @@ experiment.rotation = 0 #2*np.pi*(float(rotation)/360) # convert rotation to rad
 experiment.screen,experiment.mainfont = init_interface(experiment,conf)
 #draw_arc(experiment.screen) # so that something is there for the subject to gaze at
 experiment.visualfb = False
-draw_positions(experiment,{"phase":"null","direction":"left","target.position":conf["RIGHT_ARC_ORIGIN"],"start.position":conf["LEFT_ARC_ORIGIN"]})
+draw_positions(experiment,{"phase":"null","direction":"left","target.position":conf["RIGHT_ORIGIN"],"start.position":conf["LEFT_ORIGIN"]})
 pygame.display.flip()
 
 # This prepares the surface that contains the arc, so that we don't have to
