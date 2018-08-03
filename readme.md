@@ -89,7 +89,9 @@ Do you have any questions?
 
 ## TODO
 
-- [ ] Cursor never appears when you start moving too early.
-- [ ] First data point is wrong (from previous trial?)
-- [ ] Remove demo cursor?
-
+- [x] When you are outside of start at the beginning of a trial, reset the trial
+- [x] Cursor never appears when you start moving too early.
+- [x] First data point is wrong (from previous trial?)
+- [x] Remove demo cursor?
+- [ ] Active-to-null should stay within the X-plane
+- [ ] Make instruction video
