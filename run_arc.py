@@ -100,7 +100,10 @@ conf["RETURN_TIME"] = 1.5
 
 conf["FADE_TIME"] = .5 # how much time to let the forces fade at the target position
 
-conf["MAX_TRIAL_TIME"] = 1.7 # the maximum trial duration (in s)
+# This is for the no-feedback mode - since it's difficult for the subject to reach the target
+# without visual feedback, we simply quit the trial after a fixed duration, which is specified
+# by the parameter below.
+conf["MAX_TRIAL_TIME"] = 2.5 # 1.7 # the maximum trial duration (in s) after which we abort the trial (if in no-feedback mode)
 
 
 # The duration (in s) to show the final position, once the trial has ended (i.e. the participant
@@ -230,6 +233,7 @@ conf["X_PLANE"]=0  # Defines the plane within which we restrict the robot
 
 
 
+
 def draw_item(screen,item, (y,z)):   ##### DEPRECATED #######n
     """ Draw a particular item (target or cursor) on the screen at the given (y,z) position. """
     if item=="target-nogo": # The cursor prior to the go signal
@@ -256,7 +260,7 @@ def draw_item(screen,item, (y,z)):   ##### DEPRECATED #######n
 
 
 
-def draw_arc(surface): #,horizontal_flip=False):
+def draw_arc(surface,col=conf["ARC_COLOUR"]): #,horizontal_flip=False):
     # Draws the arc on to the surface (which should be the screen).
     # If horizontal_flip is True, then we flip the blitted surface horizontally
     # before blitting. This ensures that the feathering around the target area
@@ -279,7 +283,7 @@ def draw_arc(surface): #,horizontal_flip=False):
     #print(fullarc)
 
     poly = [ robot_to_screen(ry,rz,conf) for (ry,rz) in fullarc ]
-    pygame.draw.polygon( surface,conf["ARC_COLOUR"],poly)
+    pygame.draw.polygon( surface,col,poly)
     #for (x,y) in poly:
     #    pygame.draw.circle(surface,conf["ARC_COLOUR"],(x,y),5)
 
@@ -290,7 +294,7 @@ def draw_arc(surface): #,horizontal_flip=False):
     #print(fullarc)
 
     poly = [ robot_to_screen(ry,rz,conf) for (ry,rz) in fullarc ]
-    pygame.draw.polygon( surface,conf["ARC_COLOUR"],poly)
+    pygame.draw.polygon( surface,col,poly)
 
 
 
@@ -333,6 +337,34 @@ def draw_cursor(surface,pos):
     maxy=max(y1,y2)
     pygame.draw.ellipse(surface,conf["CURSOR_COLOUR"],
                         [minx,miny,maxx-minx,maxy-miny])
+
+
+
+
+
+
+def draw_sneak_peek(experiment,trialdata):
+    # This function draws a schematic of the subject' s trajectory
+    # even when it' s not shown on the subject' s screen,
+    # so that the experimenter can be voyeur to the trajectory
+    # and spot any irregularities.
+
+    surf = pygame.Surface(conf["SCREENSIZE"])
+    surf.fill((0,0,0))
+
+    draw_arc(surf,(100,100,100))
+    # Draw the target ball
+    draw_ball(surf,trialdata["target.position"],(255,255,255))
+
+    # Draw the starting ball
+    draw_ball(surf,trialdata["start.position"],(125,125,125))
+
+    # Now draw the history of previous positions
+    if len(trialdata["cursor.history"])>1:
+        #history = [ robot_to_screen(py,pz,conf) for (py,pz,_) in trialdata["position.history"] ]
+        pygame.draw.lines(surf,(0,255,0),False,trialdata["cursor.history"],20)
+
+    pygame.image.save(surf,'sneak_peek.bmp')
 
 
 
@@ -392,7 +424,7 @@ def draw_positions(experiment,trialdata):
             if len(trialdata["cursor.history"])>1:
                 #history = [ robot_to_screen(py,pz,conf) for (py,pz,_) in trialdata["position.history"] ]
                 pygame.draw.lines(experiment.screen,col,False,trialdata["cursor.history"],conf["HISTORY_LINE_WIDTH"])
-                                  
+
                 #(oy,oz) = history[0] #,_) = trialdata["position.history"][0]
                 #for (y,z) in history[1:]: #trialdata["position.history"][1:]:
                 #    pygame.draw.line(experiment.screen,col,(oy,oz),(y,z),conf["HISTORY_LINE_WIDTH"])
@@ -410,16 +442,17 @@ def draw_positions(experiment,trialdata):
 
     else: # i.e. if not experiment.visualfb
 
-        if trialdata["phase"]=="active" and trialdata["t.movestart"]==None: # the go signal is there but the subject has not started moving
-            draw_cursor(experiment.screen,trialdata["start.position"])
+        if trialdata["phase"]=="active" and trialdata["in.start"]: #trialdata["t.movestart"]==None: # the go signal is there but the subject has not started moving
+            draw_cursor(experiment.screen,trialdata["cursor.position"])
 
 
 
-        if trialdata["phase"]=='feedback': # Hmm, this doesn't seem to happen if the subject takes too long?
+        if trialdata["phase"]=='feedback':
             # Draw cursor at current position
             #if trialdata["t.current"]>=trialdata["t.start"]+trialdata["t.go"]:
             #draw_item(experiment.screen,"cursor",trialdata["cursor.position"])
-            draw_cursor(experiment.screen,trialdata["cursor.position"])
+            #draw_cursor(experiment.screen,trialdata["cursor.position"])
+            pass
 
 
 
@@ -464,21 +497,21 @@ def reset_trial(experiment,trialdata,t):
     trialdata['n.reset']        += 1
     trialdata["t.stay"]         = t+conf["RETURN_TIME"] # when to start staying and fading
     trialdata["t.go"]           = t+conf["RETURN_TIME"]+conf["FADE_TIME"] # when to give the go signal
-    trialdata["t.trial.finish"] = t+10*conf["MAX_TRIAL_TIME"] # when the trial will end
-    
+    trialdata["t.trial.finish"] = np.inf #t+10*conf["MAX_TRIAL_TIME"] # when the trial will end
+
     trialdata["t.start"]        = t
     trialdata["t.current"]      = t
     trialdata["t.movestart"]    = None
     trialdata["t.target.enter"] = None
     trialdata["timing"]         = "ok"
-    
-    
+
+
     # The history of positions (x,y,t) in this trial, used to show the whole trajectory at the end of the trial
     trialdata["cursor.history"] = []
-    
+
     trialdata["next.trial.t"]=np.nan
-    
-    
+
+
 
 
 
@@ -516,7 +549,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
     # However, if the previous trial was early start, then we just want to revert to the previous target
     # position.
 
-    
+
     if experiment.current_schedule>=len(experiment.schedule):
         # This should not happen in the current set up because when no next trial
         # is available we don't push it on to the schedule and therefore we don't
@@ -538,7 +571,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         obsv = tkSimpleDialog.askstring('Please record any observations', 'Experimenter, please write down any observations.\nAny irregularities?\nDid the subject seem concentrated or not?\nWere things unclear or clear?\nAnything else that is worth noting?')
         with open(experiment.obsvlog,'w') as f:
             f.write(obsv)
-        
+
         tkMessageBox.showinfo("Robot", "Block completed! Yay!")
         trialdata["t.trial.finish"]=np.inf # that's the end folks!
         experiment.keep_going = False
@@ -569,6 +602,8 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
                      "cursor.position" :oldpos,
                      'saved'           :False,
                      "aborted"         :False,
+                     "finished"        :False,
+                     "in.start"        :True,
                      'n.reset'         :0 # keeps track of how often we had to reset the trial
                      }
 
@@ -644,7 +679,7 @@ def init_logs(experiment,conf):
     ##trajlog.write('participant experiment trial x y dx dy t t.absolute\n')
 
     obsvlog    = '%sobservations.txt'%basename
-    
+
     triallog = open('%strials.txt'%basename,'w')
     triallog.write('participant experiment trial rotation target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration\n')
 
@@ -813,9 +848,10 @@ def decide_timing(trialdata):
     trialdata["duration"]=dtime
     #if dtime<conf["MIN_MOVEMENT_TIME"]:
     #    trialdata["timing"]="too_fast"
-    #if dtime>conf["MAX_MOVEMENT_TIME"]:
-    #    trialdata["timing"]="too_slow"
-    trialdata["timing"]="ok"
+    if dtime>conf["MAX_MOVEMENT_TIME"]:
+        trialdata["timing"]="too_slow"
+    else:
+        trialdata["timing"]="ok"
 
 
 
@@ -868,6 +904,8 @@ def run():
                  "cursor.position" :(np.nan,np.nan),
                  "t.start"         :np.nan,
                  "t.trial.finish"  :-np.inf,
+                 "finished"        :True,
+                 "aborted"         :False,
                  "target.position" :conf["RIGHT_ORIGIN"],
                  "start.position"  :conf["LEFT_ORIGIN"]}
 
@@ -898,13 +936,13 @@ def run():
         pos = robot.rshm('y'),robot.rshm('z')
         update_position(trialdata,pos,conf)
 
-        # Decide whether we have reached the outside of the circle; if so, trial ends
+        # Decide how far the subject has moved from the the starting position
         dfromstart = np.sqrt(sum((np.array(trialdata["cursor.position"])-np.array(trialdata["start.position"]))**2))
-        # Determine the distance to the target; if they are close enough, flag that they have entered the target
+        # Determine whether we are still within the starting zone
         in_start  = dfromstart < conf["MOVE_START_RADIUS"] if not np.isnan(dfromstart) else True
+        trialdata["in.start"]=in_start
 
-        
-        if trialdata["t.current"]>=trialdata["t.trial.finish"]: # this is where the trial should end
+        if trialdata["t.current"]>=trialdata["t.trial.finish"]: # this is where the trial should end --- NOTE that this is now deprecated, we no longer abort trials based on time
 
             # First of all, are we currently in the middle of a trial? Then we have to abort it.
             if trialdata["phase"]=="active":
@@ -932,13 +970,13 @@ def run():
             robot.start_capture()
             robot.active_to_null()
 
-            
+
         if trialdata['phase']=='stay':
 
             #if trialdata['t.current']>trialdata['t.max.move.start']:
             #    print("Waiting too long in the starting location -- aborting trial.")
             #    trialdata["aborted"]=True
-            
+
             if trialdata['t.current']>trialdata['t.go']:
 
                 if not in_start: # if the subject is no longer in the start zone, it doesn't make sense to start the trial!
@@ -958,11 +996,12 @@ def run():
             # We have completed showing feedback
             print("Completed feedback show time.")
             trialdata["phase"]="null"
+            trialdata["finished"]=True
             redraw = True
 
 
 
-        if trialdata['phase']=='null' and trialdata["t.current"]>=trialdata["t.trial.finish"]:
+        if trialdata['phase']=='null' and trialdata["finished"]: # trialdata["t.current"]>=trialdata["t.trial.finish"]:
 
             # Start a new trial (or stop if there is nothing more to be done)
             trialdata = start_new_trial(experiment,trialdata)
@@ -990,15 +1029,19 @@ def run():
             if in_start:
                 trialdata["t.movestart"]    = None; # This way, if you go back to the starting point, you effectively reset the trial
                 trialdata["t.trial.finish"] = np.inf;
-                
+
             else: # if not in start
 
-                # If we have moved far enough from the center to consider that the shooting movement has started.
+                # If we haven't already left the starting position, mark the current time as
+                # the first time that we did leave the starting position.
                 if trialdata["t.movestart"]==None:
 
                     # Movement has started
                     trialdata["t.movestart"]    = trialdata["t.current"]
-                    trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
+                    if experiment.visualfb:
+                        trialdata["t.trial.finish"] = np.inf;
+                    else:
+                        trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
                     redraw = True
 
 
@@ -1007,7 +1050,7 @@ def run():
                     if in_target:
                         if trialdata["t.target.enter"]==None: # if we have already previously entered the target
                             trialdata["t.target.enter"]=trialdata["t.current"]
-                        else:
+                        else: # if we were not in the target already
                             if trialdata["t.current"]-trialdata["t.target.enter"] > conf["IN_TARGET_TIME"]:
 
                                 ##### Trial ending
@@ -1015,7 +1058,7 @@ def run():
 
                                 trialdata["phase"]="feedback"
                                 trialdata["show.feedback.until.t"] = trialdata["t.current"]+conf["FINAL_POSITION_SHOW_TIME"]
-                                
+
                                 redraw = True
 
 
@@ -1030,6 +1073,7 @@ def run():
 
 
 
+        """ # We're not actually aborting anything anymore
         if trialdata["aborted"]:
             experiment.screen.fill(conf["EARLY_COLOUR"])
             draw_arc(experiment.screen)
@@ -1039,21 +1083,40 @@ def run():
             text_surface = calibri_font.render("ABORTED",True,(255,255,255))
             experiment.screen.blit(text_surface, (900,200))
             pygame.display.flip()
-                        
+        """
+
 
         if redraw:
             # Update the positions on the screen
             draw_positions(experiment,trialdata)
 
+            if trialdata["timing"]=="too_slow":
+                #experiment.screen.fill(conf["EARLY_COLOUR"])
+                #draw_arc(experiment.screen)
+                #draw_ball(experiment.screen,trialdata["target.position"],conf["ARC_COLOUR"])
+                #draw_ball(experiment.screen,trialdata["start.position"],conf["ARC_COLOUR"])
+                calibri_font = pygame.font.SysFont("Calibri",100)
+                text_surface = calibri_font.render("TOO SLOW",True,(255,50,50))
+                experiment.screen.blit(text_surface, (900,200))
+                #pygame.display.flip()
+
+
             pygame.display.flip()
+
+            if trialdata["timing"]=="too_slow":
+                # play a sound to indicate that this is too slow
+                #conf["honk"].play()
+                cmd =["aplay","materials/carhorn.wav"]
+                subprocess.call(cmd)
 
             if trialdata['phase']=='feedback' and not trialdata['saved']:
 
                 # Save to a file too
                 if True:
                     print("Saving to file")
-                    pygame.image.save(experiment.screen,'screenshot.bmp')
-                    subprocess.call(['convert','screenshot.bmp',
+                    draw_sneak_peek(experiment,trialdata)
+                    #pygame.image.save(experiment.screen,'screenshot.bmp')
+                    subprocess.call(['convert','sneak_peek.bmp',
                                      #'-crop','800x500+600+200',
                                      #'-flip',
                                      '-resize','400x250','screenshot.gif'])
@@ -1131,6 +1194,7 @@ def init_tk():
     l = Label(f,image=gui['photo'])
     l.grid(row=row,column=0,columnspan=5,sticky=W)
     gui["photolabel"]=l
+
 
     # Make some elements available for the future
     gui["loadb"]   =loadb
