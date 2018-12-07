@@ -139,6 +139,9 @@ conf["ARC_RADIUS_2"] = .005 # the radius of the arc in robot coordinates (m)
 
 conf["ARC_HALF_WIDTH"] = .0001 # the width of the arc (in robot coordinates, i.e. m)
 
+## NOTE -- the arc here is defined in (X,Y) plane, so that X and Y correspond to X and Y on the screen.
+## However, in the robot coordinate systems, we have three dimensions (X,Y,Z). X is kept fixed (see X_PLANE),
+## and then the screen X corresponds to the robot Y and the screen Y corresponds to the robot Z.
 conf["ARC_BASE_Y"] = 0 # the y position of the targets (in robot coordinates)
 conf["ARC_BASE_X"] = 0 # the x position of the center of the arc
 
