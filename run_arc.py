@@ -64,7 +64,7 @@ conf["MAXX"],conf["MAXY"] = conf["SCREENSIZE"]
 conf["CENTERX"],conf["CENTERY"] = conf["MAXX"]/2,conf["MAXY"]/2
 
 
-conf["M_TO_PIXEL_X"]=8*conf["MAXX"]/0.4
+conf["M_TO_PIXEL_X"]= 8*conf["MAXX"]/0.4
 conf["M_TO_PIXEL_Y"]=-8*conf["MAXX"]/0.4
 
 # Read the screen-to-robot calibration from file
@@ -135,7 +135,7 @@ conf["CURSOR_HISTORY_N_POINTS"]     = 100 # how many points there should be in t
 #ARC_RADIUS     = 50 # use in Stewart Bio
 #conf["ARC_RADIUS"]     = 149.28 # use at UdeM
 conf["ARC_RADIUS_1"] = .005 # the radius of the arc in robot coordinates (m)
-conf["ARC_RADIUS_2"] = .005 # the radius of the arc in robot coordinates (m)
+conf["ARC_RADIUS_2"] = conf["ARC_RADIUS_1"] #.005 # the radius of the arc in robot coordinates (m)
 
 conf["ARC_HALF_WIDTH"] = .0001 # the width of the arc (in robot coordinates, i.e. m)
 
@@ -591,10 +591,12 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         tcurrent  = trialdata["t.current"]
         tabs      = trialdata["t.absolute"]
         trialn    = experiment.schedule[ experiment.current_schedule ]["trial"]
+        forcechan = experiment.schedule[ experiment.current_schedule ]["force.channel"] # whether this is a channel trial
         direction = trialdata["direction"]
         oldpos    = trialdata["cursor.position"]
 
         trialdata = {"trial.number"    :trialn,
+                     "force.channel"   :forcechan,
                      "experiment"      :EXPERIMENT,
                      "phase"           :"return",
                      "t.current"       :tcurrent,
@@ -681,7 +683,7 @@ def init_logs(experiment,conf):
     obsvlog    = '%sobservations.txt'%basename
 
     triallog = open('%strials.txt'%basename,'w')
-    triallog.write('participant experiment trial rotation target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration\n')
+    triallog.write('participant experiment trial force.channel target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration\n')
 
 
     conflog = open('%sparameters.json'%basename,'w')
@@ -733,7 +735,8 @@ def triallog(experiment,trialdata):
         (trialdata["experiment"],           's'),
         #(conf["ARC_WIDTH"],                 'f'),
         (trialdata["trial.number"],         'i'),
-        (experiment.rotation,               'f'),
+        #(experiment.rotation,               'f'),
+        (trialdata["force.channel"],        'i'),
         (tx,'f'),(ty,'f'),
         (trialdata["t.go"],                 'f'),
         (trialdata["t.movestart"],          'f'),
@@ -771,8 +774,10 @@ def read_schedule_file(experiment):
         fields = [ f.strip() for f in l.split() ]
         dat = dict( zip(header,fields) )
         trials.append({"trial"      :int(dat["trial"]),
-                       "TR"         :int(dat["TR"]),
-                       "t.offset"   :float(dat["t.offset"])})
+                       "force.channel":int(dat["force.channel"]),
+                       #"TR"         :int(dat["TR"]),
+                       #"t.offset"   :float(dat["t.offset"])
+        })
 
 
 
@@ -856,6 +861,17 @@ def decide_timing(trialdata):
 
 
 
+def channel_trial(x_plane,arc_base_x,arc_base_y,arc_radius):
+    """ Play the movement which is in trajectory in the shared memory """
+    robot.wshm('arc_x_plane', x_plane)
+    robot.wshm('arc_base_y',  arc_base_x)
+    robot.wshm('arc_base_z',  arc_base_y)
+    robot.wshm('arc_radius',  arc_radius)
+    robot.wshm('controller',  7)
+    robot.wait_for_the_new_instruction(11) # update the variable group corresponding to this controller
+
+
+        
 
 def run():
     """ Do one run of the experiment. """
@@ -880,7 +896,7 @@ def run():
         return
     experiment.schedulefile = schedulefile
 
-    experiment.visualfb = gui["visualfb"].get()!=0
+    experiment.visualfb     = gui["visualfb"].get()!=0
 
     experiment.calib = None #conf["calib"]
 
@@ -926,7 +942,6 @@ def run():
         # Keep track of whether we will want to redraw
         redraw = False
 
-
         trialdata["t.absolute"] = time.time()
 
         # Get the current time (coded in seconds but with floating point precision)
@@ -968,7 +983,15 @@ def run():
         if trialdata['phase']=='return' and trialdata['t.current']>trialdata['t.stay']:
             trialdata['phase']='stay'
             robot.start_capture()
-            robot.active_to_null()
+            if trialdata["force.channel"]:
+                # TODO: possibly we could "fade out" forces here gradually?
+                print("--- Channel trial.")
+                channel_trial(conf["X_PLANE"],
+                              conf["ARC_BASE_X"],
+                              conf["ARC_BASE_Y"],
+                              conf["ARC_RADIUS_1"]) #arcradius)
+            else:
+                robot.active_to_null()
 
 
         if trialdata['phase']=='stay':
@@ -987,7 +1010,8 @@ def run():
                 else:
                     print("Go!")
                     trialdata['phase']='active' # go! start showing the cursor and let's move
-                    robot.three_d_to_two_d(conf["X_PLANE"])
+                    if not trialdata["force.channel"]:
+                        robot.three_d_to_two_d(conf["X_PLANE"])
                     redraw = True # because if no visual fb, we should at least show the cursor
 
 
