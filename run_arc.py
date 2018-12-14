@@ -28,6 +28,10 @@ import tkSimpleDialog
 
 import json
 
+import mmap
+import comedi
+import array
+
 
 # The little control window
 CONTROL_WIDTH,CONTROL_HEIGHT= 500,500 #1000,800 #450,400 # control window dimensions
@@ -533,6 +537,8 @@ def finish_trial(experiment,trialdata):
                                 'n.reset'     :trialdata["n.reset"],
                                 "capture.t"   :time.time()})
 
+    comedi_unload()
+    
     # Dump everything we have captured so far to a pickle
     #pickle.dump(traj,open('data/_tmp_trial%i.pickle'%trialdata["trial.number"],'wb'))
     #pickle.dump(experiment.captured,open(experiment.capturelog,'wb'))
@@ -615,6 +621,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         print ("Starting trial #%i"%trialdata["trial.number"])
         #robot.wshm('fvv_trial_no',trialn)
 
+        init_comedi()
 
         # Decide the movement direction for this trial (should be opposite of that of the previous trial)
         if dont_swap:
@@ -676,6 +683,7 @@ def init_logs(experiment,conf):
     #logfile = open("data/exampledata.txt",'w')
     timestamp = datetime.datetime.now().strftime("%d_%m.%Hh%Mm%S")
     basename = './data/%s_%s_%s_'%(experiment.participant,EXPERIMENT,timestamp)
+    conf["basename"]=basename
     trajlog = '%strajectory.bin'%basename
     # robot.start_log(trajlog,N_ROBOT_LOG)      # This lign is only for the inmotion robot
 
@@ -704,8 +712,9 @@ def init_logs(experiment,conf):
     ]:
         params[key]=value #.append((str(key),str(value)))
     for key in sorted(conf):
-        params[key]=conf[key]
-        #nparams.append((str(key),str(conf[key])))
+        if not key.startswith('comedi'):
+            params[key]=conf[key]
+            #nparams.append((str(key),str(conf[key])))
     #print(conf["calib"])
     #for (key,value) in params:
     #    conflog.write('%s;%s\n'%(key,value))
@@ -828,8 +837,161 @@ def load_robot():
         pass  #wait until the end of the movement
     robot.three_d_to_two_d(conf["X_PLANE"])
 
+    #init_comedi()
 
 
+
+def init_comedi():
+    """ Initialises the COMEDI interface, which is for reading the force transducer."""
+    
+    ##
+    ## Okay, now also load the sensor reading
+    ##
+    #open a comedi device
+    conf["comedi.dev"] =comedi.comedi_open('/dev/comedi0')
+    if not conf["comedi.dev"]: raise Exception("Error opening Comedi device") # This can happen if you do not have sufficient read privileges to /dev/comedi0, try running with sudo
+    
+    #get a file-descriptor for use later
+    conf["comedi.fd"]    = comedi.comedi_fileno(conf["comedi.dev"])
+    if conf["comedi.fd"]<=0: raise Exception("Error obtaining Comedi device file descriptor")
+
+    print("\nCOMEDI loaded (for reading force sensors)")
+    
+    conf["comedi.freq"]=1000   # sampling frequency (Hz I hope)
+    subdevice=0 # no idea
+    conf["comedi.subdev"]=subdevice
+
+    NCHANNEL=16  # how many channels we are reading (TODO)
+
+    #three lists containing the chans, gains and referencing
+    #the lists must all have the same length
+    chans  = range(NCHANNEL);#[0,1,2,3]
+    gains  = [0]*NCHANNEL #[0,0,0,0]
+    aref   = [comedi.AREF_GROUND]*NCHANNEL #, c.AREF_GROUND, c.AREF_GROUND, c.AREF_GROUND]
+    nchans = NCHANNEL #len(chans) #number of channels
+
+    #wrappers include a "chanlist" object (just an Unsigned Int array) for holding the chanlist information
+    mylist = comedi.chanlist(nchans) #create a chanlist of length nchans
+
+    #now pack the channel, gain and reference information into the chanlist object
+    #N.B. the CR_PACK and other comedi macros are now python functions
+    for index in range(nchans):
+        mylist[index]=comedi.cr_pack(chans[index], gains[index], aref[index])
+
+    conf["comedi.size"] = comedi.comedi_get_buffer_size(conf["comedi.dev"], subdevice)
+    print("Comedi buffer size is %d"% conf["comedi.size"])
+    conf["comedi.map"]  = mmap.mmap(conf["comedi.fd"], conf["comedi.size"], mmap.MAP_SHARED, mmap.PROT_READ)
+    ##print("map = ", map)
+
+    cmd = comedi.comedi_cmd_struct()
+    cmd.chanlist = mylist # adjust for our particular context
+    cmd.chanlist_len = nchans
+    cmd.scan_end_arg = nchans
+    prepare_cmd(conf["comedi.dev"],subdevice,cmd,conf["comedi.freq"],nchans,mylist)
+    conf["comedi.cmd"]=cmd
+
+
+
+
+def dump_cmd(cmd):
+    print("---------------------------")
+    print("command structure contains:")
+    print("cmd.subdev : ", cmd.subdev)
+    print("cmd.flags : ", cmd.flags)
+    print("cmd.start :\t", cmd.start_src, "\t", cmd.start_arg)
+    print("cmd.scan_beg :\t", cmd.scan_begin_src, "\t", cmd.scan_begin_arg)
+    print("cmd.convert :\t", cmd.convert_src, "\t", cmd.convert_arg)
+    print("cmd.scan_end :\t", cmd.scan_end_src, "\t", cmd.scan_end_arg)
+    print("cmd.stop :\t", cmd.stop_src, "\t", cmd.stop_arg)
+    print("cmd.chanlist : ", cmd.chanlist)
+    print("cmd.chanlist_len : ", cmd.chanlist_len)
+    print("cmd.data : ", cmd.data)
+    print("cmd.data_len : ", cmd.data_len)
+    print("---------------------------")
+
+    
+
+def prepare_cmd(dev, subdev, C, freq, nchans, mylist):
+    #global cmd
+
+    C.subdev = subdev
+    C.flags = 0
+    C.start_src = comedi.TRIG_NOW
+    C.start_arg = 0
+    C.scan_begin_src = comedi.TRIG_TIMER
+    C.scan_begin_arg = int(1e9/freq)
+    C.convert_src = comedi.TRIG_TIMER
+    C.convert_arg = 1
+    C.scan_end_src = comedi.TRIG_COUNT
+    C.scan_end_arg = nchans
+    C.stop_src = comedi.TRIG_NONE
+    #C.stop_src = c.TRIG_COUNT
+    C.stop_arg = 0
+    #C.stop_arg = 1000
+    C.chanlist = mylist
+    C.chanlist_len = nchans
+
+
+
+
+def comedi_start_record():
+    """ Start recording from the COMEDI device."""
+    #test our comedi command a few times. 
+    ret = comedi.comedi_command_test(conf["comedi.dev"],conf["comedi.cmd"])
+    print("first cmd test returns ", ret)#, cmdtest_messages[ret]
+    if ret<0:
+        raise Exception("comedi_command_test failed")
+    #dump_cmd(cmd)
+
+    ret = comedi.comedi_command_test(conf["comedi.dev"],conf["comedi.cmd"])
+    print("second test returns ", ret)#, cmdtest_messages[ret])
+    if ret<0:
+        raise Exception("comedi_command_test failed")
+    if ret !=0:
+        #dump_cmd(cmd)
+        raise Exception("ERROR preparing command")
+    #dump_cmd(cmd)
+    
+    ret = comedi.comedi_command(conf["comedi.dev"],conf["comedi.cmd"])
+    if ret<0:
+        print("### Error executing comedi_command!!! Not reading sensor")
+        print(ret)
+
+        
+        
+def comedi_stop_record(fname):
+    """ Stop recording from the COMEDI device and save the output to the given filename fname. """
+    back  = 0  # always read from the beginning of the buffer (assumes that we clear the buffer at the beginning of each trial)
+    front = comedi.comedi_get_buffer_contents(conf["comedi.dev"],conf["comedi.subdev"])
+
+    DATA = array.array("H") # reset array to empty    
+
+    conf["comedi.map"].seek(back%conf["comedi.size"])
+    for i in range(back,front,2):
+	DATA.fromstring(conf["comedi.map"].read(2))
+	if conf["comedi.map"].tell() == conf["comedi.size"]:
+	    conf["comedi.map"].seek(0)
+            
+    of = open(fname,"wb")
+    DATA.tofile(of) # append data to log file
+    of.flush()
+    of.close()
+
+    ## 	time.sleep(.01)
+    ret = comedi.comedi_mark_buffer_read(conf["comedi.dev"],conf["comedi.subdev"],front-back)
+    print("Read %d bytes from COMEDI"%(front-back))
+    return []
+
+
+    
+
+
+def comedi_unload():
+    ret = comedi.comedi_close(conf["comedi.dev"])
+    if ret<0:
+	print("### ERROR executing comedi_close ### (but hey, we're done already anyway)")
+    
+    
 
 
 def end_program():
@@ -837,6 +999,7 @@ def end_program():
     experiment.keep_going = False
     if gui['loaded']:
         robot.unload()
+        comedi_unload()
         gui["loaded"]=False
 
     ending()
@@ -995,6 +1158,7 @@ def run():
                               conf["ARC_RADIUS_1"]) #arcradius)
             else:
                 robot.active_to_null()
+            comedi_start_record() # start recording, clear buffer
 
 
         if trialdata['phase']=='stay':
@@ -1088,9 +1252,12 @@ def run():
 
                                 redraw = True
 
-
                                 ### Wrap up the rest of the trial
                                 robot.stay()
+
+                                #if trialdata["force.channel"]:
+                                comedi_stop_record("%s_force_trial%d.bin"%(conf["basename"],trialdata["trial.number"]))
+                                
                                 finish_trial(experiment,trialdata)
 
 

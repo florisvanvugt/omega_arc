@@ -17,7 +17,7 @@ simpleschedule.txt: make_schedule.py
 	python make_schedule.py
 
 arc: rob
-	python2 run_arc.py
+	sudo python2 run_arc.py
 
 rob:
 	make -C robot
