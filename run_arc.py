@@ -34,7 +34,7 @@ import array
 
 
 # The little control window
-CONTROL_WIDTH,CONTROL_HEIGHT= 500,500 #1000,800 #450,400 # control window dimensions
+CONTROL_WIDTH,CONTROL_HEIGHT= 500,550 #1000,800 #450,400 # control window dimensions
 CONTROL_X,CONTROL_Y = 500,50 # controls where on the screen the control window appears
 
 
@@ -199,7 +199,7 @@ conf["FLIP_TEXT"] = True # whether to X-flip the text (mirror image) so that you
 
 
 ## Whether to show the past trajectory while the subject is moving
-conf["SHOW_ONLINE_TRAJECTORY"] = True
+conf["SHOW_ONLINE_TRAJECTORY"] = False # True
 
 ## Whether to show the trajectory after the trial has ended
 conf["SHOW_OFFLINE_TRAJECTORY"] = True
@@ -415,7 +415,8 @@ def draw_positions(experiment,trialdata):
 
 
     if experiment.visualfb:
-
+	
+	conf["SHOW_ONLINE_TRAJECTORY"] = False
         # showing the trajectory so-far
         if trialdata["phase"] in ['active','feedback']:
             col = conf["TRAJECTORY_COLOR"]
@@ -426,9 +427,10 @@ def draw_positions(experiment,trialdata):
                     #col = conf["EARLY_COLOUR"]
                 #else:
                 col = conf["TARGET_ON_TIME_COLOUR"]
+		conf["SHOW_ONLINE_TRAJECTORY"] = True
 
             # Now draw the history of previous positions
-            if len(trialdata["cursor.history"])>1:
+            if len(trialdata["cursor.history"])>1 and conf["SHOW_ONLINE_TRAJECTORY"]:
                 #history = [ robot_to_screen(py,pz,conf) for (py,pz,_) in trialdata["position.history"] ]
                 pygame.draw.lines(experiment.screen,col,False,trialdata["cursor.history"],conf["HISTORY_LINE_WIDTH"])
 
@@ -618,6 +620,8 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
                      'n.reset'         :0 # keeps track of how often we had to reset the trial
                      }
 
+        trialdata["force_filename"]="%s_force_trial%d.bin"%(conf["basename"],trialdata["trial.number"])
+        
         print ("Starting trial #%i"%trialdata["trial.number"])
         #robot.wshm('fvv_trial_no',trialn)
 
@@ -682,7 +686,12 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
 def init_logs(experiment,conf):
     #logfile = open("data/exampledata.txt",'w')
     timestamp = datetime.datetime.now().strftime("%d_%m.%Hh%Mm%S")
-    basename = './data/%s_%s_%s_'%(experiment.participant,EXPERIMENT,timestamp)
+    subjdir = './data/%s'%(experiment.participant)
+    os.mkdir(subjdir)
+    basename = './data/%s/%s_%s_%s_%s_'%(experiment.participant,
+                                         experiment.participant,
+                                         experiment.blocknr,
+                                         EXPERIMENT,timestamp)
     conf["basename"]=basename
     trajlog = '%strajectory.bin'%basename
     # robot.start_log(trajlog,N_ROBOT_LOG)      # This lign is only for the inmotion robot
@@ -1053,6 +1062,14 @@ def run():
     experiment.participant = participant
 
 
+    blocknr=gui["blocknr"].get().strip()
+    if blocknr=="":
+        tkMessageBox.showinfo("Error", "You need to enter a block number.")
+        return
+    experiment.blocknr = blocknr
+
+    
+
     schedulefile=gui["schedulef"].get().strip()
     if schedulefile=="":
         tkMessageBox.showinfo("Error", "You need to enter a schedule file name.")
@@ -1233,6 +1250,7 @@ def run():
                         trialdata["t.trial.finish"] = np.inf;
                     else:
                         trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
+			comedi_stop_record(trialdata["force_filename"])
                     redraw = True
 
 
@@ -1256,7 +1274,7 @@ def run():
                                 robot.stay()
 
                                 #if trialdata["force.channel"]:
-                                comedi_stop_record("%s_force_trial%d.bin"%(conf["basename"],trialdata["trial.number"]))
+			        comedi_stop_record(trialdata["force_filename"])
                                 
                                 finish_trial(experiment,trialdata)
 
@@ -1264,7 +1282,7 @@ def run():
                     else:
                         # If we are outside of the target, we need to reset the target enter time
                         trialdata["t.target.enter"]=None
-
+		
 
 
         """ # We're not actually aborting anything anymore
@@ -1351,6 +1369,11 @@ def init_tk():
     l      = Label(f, text="subject ID",             fg="white", bg="black")
     subjid = Entry(f, textvariable=gui["subject.id"],fg="white", bg="black",insertbackground='yellow')
 
+    gui["blocknr"] = StringVar()
+    lb     = Label(f, text="block",               fg="white", bg="black")
+    blockn = Entry(f, textvariable=gui["blocknr"],fg="white", bg="black",insertbackground='yellow')
+
+    
     row  = 0
     f.grid         (row=row,padx=10,pady=10)
     row += 1
@@ -1359,6 +1382,10 @@ def init_tk():
     row += 1
     l.grid         (row=row,column=0,sticky=W,pady=10)
     subjid.grid    (row=row,column=1,sticky=W,padx=10)
+
+    row += 1
+    lb.grid        (row=row,column=0,sticky=W,pady=10)
+    blockn.grid    (row=row,column=1,sticky=W,padx=10)    
 
     row +=1
     gui["schedulef"]  = StringVar()
