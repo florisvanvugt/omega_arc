@@ -501,6 +501,8 @@ def reset_trial(experiment,trialdata,t):
     """
     Sets everything up for the current trial to start ... now!
     """
+
+    # move back to start position
     (ry,rz) = trialdata["start.position"]
     print("Initiate move to %f,%f"%(ry,rz))
     robot.move_to(conf["X_PLANE"],ry,rz,conf["RETURN_TIME"])
@@ -522,7 +524,8 @@ def reset_trial(experiment,trialdata,t):
 
     trialdata["next.trial.t"]=np.nan
 
-
+    trialdata["next.phase"]='return' # now we're pretending we just finished returning the subject to the start position
+    # and we let the "normal" code take it from here.
 
 
 
@@ -626,7 +629,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
 
         trialdata["force_filename"]="%s_force_trial%d.bin"%(conf["basename"],trialdata["trial.number"])
         
-        print ("Starting trial #%i"%trialdata["trial.number"])
+        print ("\n\n## Starting trial #%i"%trialdata["trial.number"])
         #robot.wshm('fvv_trial_no',trialn)
         
         init_comedi()
@@ -952,7 +955,7 @@ def prepare_cmd(dev, subdev, C, freq, nchans, mylist):
 
 def comedi_start_record():
     """ Start recording from the COMEDI device."""
-    #test our comedi command a few times. 
+    #test our comedi command a few times.
     ret = comedi.comedi_command_test(conf["comedi.dev"],conf["comedi.cmd"])
     #print("first cmd test returns %d"% ret)#, cmdtest_messages[ret]
     if ret<0:
@@ -972,6 +975,8 @@ def comedi_start_record():
     if ret<0:
         print("### Error executing comedi_command!!! Not reading sensor")
         print(ret)
+    # Now we should be in business, recording the trial.
+    #print(dur) # sec  20190111 -- we tested how long this shebang takes and it's .04ms, so 
 
         
         
@@ -1178,6 +1183,7 @@ def run():
             robot.start_capture()
             if trialdata["force.channel"]:
                 # TODO: possibly we could "fade out" forces here gradually?
+                # Nope - cancelled that, because the channel will keep subjects vertically up.
                 print("--- Channel trial.")
                 channel_trial(conf["X_PLANE"],
                               conf["ARC_BASE_X"],
@@ -1185,7 +1191,6 @@ def run():
                               conf["ARC_RADIUS_1"]) #arcradius)
             else: # if not a channel trial, fade out forces...
                 robot.active_to_null()
-            comedi_start_record() # start recording, clear buffer
 
 
         if trialdata['phase']=='stay':
@@ -1203,8 +1208,9 @@ def run():
                     reset_trial(experiment,trialdata,trialdata["t.current"])
                 else:
                     print("Go!")
+                    comedi_start_record() # start recording, clear buffer
                     trialdata['next.phase']='active' # go! start showing the cursor and let's move
-                    if not trialdata["force.channel"]:
+                    if not trialdata["force.channel"]: # if this is a normal trial (no channel trial) then here we release the handle
                         robot.three_d_to_two_d(conf["X_PLANE"])
                     redraw = True # because if no visual fb, we should at least show the cursor
 
