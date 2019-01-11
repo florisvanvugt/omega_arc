@@ -127,7 +127,6 @@ conf["MOVE_START_RADIUS"] = conf["TARGET_RADIUS"]
 
 
 
-
 # Colour to show the history of cursor positions (i.e. trajectory) (at the end of the trial)
 conf["CURSOR_HISTORY_COLOUR"]       = (255,255,255)
 conf["CURSOR_HISTORY_RADIUS"]       = 9
@@ -195,11 +194,12 @@ conf["FLIP_TEXT"] = True # whether to X-flip the text (mirror image) so that you
 
 
 
+# Whether we show the trajectory trace during the movement itself.
+# Note that we will *always* show the trajectory after the movement
+# has finished, so this variable only controls the display during movement.
+conf["SHOW_ONLINE_TRAJECTORY"] = False
 
 
-
-## Whether to show the past trajectory while the subject is moving
-conf["SHOW_ONLINE_TRAJECTORY"] = False # True
 
 ## Whether to show the trajectory after the trial has ended
 conf["SHOW_OFFLINE_TRAJECTORY"] = True
@@ -416,21 +416,23 @@ def draw_positions(experiment,trialdata):
 
     if experiment.visualfb:
 	
-	conf["SHOW_ONLINE_TRAJECTORY"] = False
         # showing the trajectory so-far
         if trialdata["phase"] in ['active','feedback']:
+
             col = conf["TRAJECTORY_COLOR"]
+
+            # If this is the feedback phase, and we want to colour code the trajectory
+            # during the feedback phase, then determine the drawing colour now.
             if trialdata["phase"]=="feedback" and conf["COLOUR_OFFLINE_TRAJECTORY"]:
                 #if trialdata["timing"]=="too_slow":
-                    #col = conf["LATE_COLOUR"]
+                #col = conf["LATE_COLOUR"]
                 #elif trialdata["timing"]=="too_fast":
-                    #col = conf["EARLY_COLOUR"]
+                #col = conf["EARLY_COLOUR"]
                 #else:
                 col = conf["TARGET_ON_TIME_COLOUR"]
-		conf["SHOW_ONLINE_TRAJECTORY"] = True
 
             # Now draw the history of previous positions
-            if len(trialdata["cursor.history"])>1 and conf["SHOW_ONLINE_TRAJECTORY"]:
+            if len(trialdata["cursor.history"])>1 and (conf["SHOW_ONLINE_TRAJECTORY"] or trialdata["phase"]=="feedback"):
                 #history = [ robot_to_screen(py,pz,conf) for (py,pz,_) in trialdata["position.history"] ]
                 pygame.draw.lines(experiment.screen,col,False,trialdata["cursor.history"],conf["HISTORY_LINE_WIDTH"])
 
@@ -617,6 +619,8 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
                      "aborted"         :False,
                      "finished"        :False,
                      "in.start"        :True,
+                     "direction"       :'undecided',
+                     'target.position' :'target.position',
                      'n.reset'         :0 # keeps track of how often we had to reset the trial
                      }
 
@@ -624,7 +628,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         
         print ("Starting trial #%i"%trialdata["trial.number"])
         #robot.wshm('fvv_trial_no',trialn)
-
+        
         init_comedi()
 
         # Decide the movement direction for this trial (should be opposite of that of the previous trial)
@@ -641,22 +645,24 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
             target_position,startpos = conf["RIGHT_ORIGIN"],conf["LEFT_ORIGIN"]
         else: # if direction==left
             target_position,startpos = conf["LEFT_ORIGIN"],conf["RIGHT_ORIGIN"]
-
-
-        (ry,rz) = startpos
-        print("Initiate move to %f,%f"%(ry,rz))
-        robot.move_to(0,ry,rz,conf["RETURN_TIME"])
-
-
         trialdata["target.position"]=target_position
-
-
         # The starting position
         trialdata["start.position"]  =startpos
 
         # Apply the proper rotation
         #rotate_cursor(trialdata,experiment)
         trialdata["cursor.start"]    =startpos #trialdata["cursor.position"]
+
+
+        # Redraw the display - clean slate
+        draw_positions(experiment,trialdata)
+        pygame.display.flip()
+
+        # Move to the starting position
+        (ry,rz) = startpos
+        print("Initiate move to %f,%f"%(ry,rz))
+        robot.move_to(0,ry,rz,conf["RETURN_TIME"])
+
 
         # Decide after how long the GO signal is to be given (in seconds)
         #go_time = random.uniform(TRIAL_START_MIN,TRIAL_START_MAX)
@@ -687,7 +693,8 @@ def init_logs(experiment,conf):
     #logfile = open("data/exampledata.txt",'w')
     timestamp = datetime.datetime.now().strftime("%d_%m.%Hh%Mm%S")
     subjdir = './data/%s'%(experiment.participant)
-    os.mkdir(subjdir)
+    if not os.path.exists(subjdir):
+        os.makedirs(subjdir)
     basename = './data/%s/%s_%s_%s_%s_'%(experiment.participant,
                                          experiment.participant,
                                          experiment.blocknr,
@@ -947,13 +954,13 @@ def comedi_start_record():
     """ Start recording from the COMEDI device."""
     #test our comedi command a few times. 
     ret = comedi.comedi_command_test(conf["comedi.dev"],conf["comedi.cmd"])
-    print("first cmd test returns ", ret)#, cmdtest_messages[ret]
+    #print("first cmd test returns %d"% ret)#, cmdtest_messages[ret]
     if ret<0:
         raise Exception("comedi_command_test failed")
     #dump_cmd(cmd)
 
     ret = comedi.comedi_command_test(conf["comedi.dev"],conf["comedi.cmd"])
-    print("second test returns ", ret)#, cmdtest_messages[ret])
+    #print("second test returns %d"%ret)#, cmdtest_messages[ret])
     if ret<0:
         raise Exception("comedi_command_test failed")
     if ret !=0:
@@ -996,6 +1003,9 @@ def comedi_stop_record(fname):
 
 
 def comedi_unload():
+    if 'comedi.dev' not in conf:
+        print("### WARNING: you asked me to close Comedi but I don't have a Comedi device. Is this a joke? / Comedy?")
+        return
     ret = comedi.comedi_close(conf["comedi.dev"])
     if ret<0:
 	print("### ERROR executing comedi_close ### (but hey, we're done already anyway)")
@@ -1155,7 +1165,7 @@ def run():
                 trialdata["duration"]             = np.nan
                 trialdata["timing"]               = "incomplete.trial"
 
-                trialdata["phase"]="feedback"
+                trialdata["next.phase"]="feedback"
                 trialdata["show.feedback.until.t"] = trialdata["t.current"]+conf["FINAL_POSITION_SHOW_TIME"]
 
                 robot.stay() # stop the subject in their tracks
@@ -1164,7 +1174,7 @@ def run():
 
         # Is it time to start holding the robot at the center?
         if trialdata['phase']=='return' and trialdata['t.current']>trialdata['t.stay']:
-            trialdata['phase']='stay'
+            trialdata['next.phase']='stay'
             robot.start_capture()
             if trialdata["force.channel"]:
                 # TODO: possibly we could "fade out" forces here gradually?
@@ -1173,7 +1183,7 @@ def run():
                               conf["ARC_BASE_X"],
                               conf["ARC_BASE_Y"],
                               conf["ARC_RADIUS_1"]) #arcradius)
-            else:
+            else: # if not a channel trial, fade out forces...
                 robot.active_to_null()
             comedi_start_record() # start recording, clear buffer
 
@@ -1193,7 +1203,7 @@ def run():
                     reset_trial(experiment,trialdata,trialdata["t.current"])
                 else:
                     print("Go!")
-                    trialdata['phase']='active' # go! start showing the cursor and let's move
+                    trialdata['next.phase']='active' # go! start showing the cursor and let's move
                     if not trialdata["force.channel"]:
                         robot.three_d_to_two_d(conf["X_PLANE"])
                     redraw = True # because if no visual fb, we should at least show the cursor
@@ -1203,13 +1213,13 @@ def run():
         if trialdata["phase"]=="feedback" and trialdata["t.current"]>=trialdata.get("show.feedback.until.t",np.inf):
             # We have completed showing feedback
             print("Completed feedback show time.")
-            trialdata["phase"]="null"
+            trialdata["next.phase"]="null"
             trialdata["finished"]=True
             redraw = True
 
 
 
-        if trialdata['phase']=='null' and trialdata["finished"]: # trialdata["t.current"]>=trialdata["t.trial.finish"]:
+        elif trialdata['phase']=='null' and trialdata["finished"]: # trialdata["t.current"]>=trialdata["t.trial.finish"]:
 
             # Start a new trial (or stop if there is nothing more to be done)
             trialdata = start_new_trial(experiment,trialdata)
@@ -1265,7 +1275,7 @@ def run():
                                 ##### Trial ending
                                 decide_timing(trialdata)
 
-                                trialdata["phase"]="feedback"
+                                trialdata["next.phase"]="feedback"
                                 trialdata["show.feedback.until.t"] = trialdata["t.current"]+conf["FINAL_POSITION_SHOW_TIME"]
 
                                 redraw = True
@@ -1296,6 +1306,9 @@ def run():
             experiment.screen.blit(text_surface, (900,200))
             pygame.display.flip()
         """
+        
+        if "next.phase" in trialdata.keys():
+            trialdata["phase"]=trialdata["next.phase"] # update the phase
 
 
         if redraw:
@@ -1314,6 +1327,7 @@ def run():
 
 
             pygame.display.flip()
+            #print("Drawn screen for phase %s"%trialdata["phase"])
 
             if trialdata["timing"]=="too_slow":
                 # play a sound to indicate that this is too slow
@@ -1336,10 +1350,6 @@ def run():
 
                     gui["photo"]=PhotoImage(file='screenshot.gif')
                     gui["photolabel"].configure(image=gui["photo"])
-
-
-        #if redraw_demo :
-        #    draw_demonstration(experiment, trialdata)
 
 
         master.update_idletasks()
