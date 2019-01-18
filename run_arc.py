@@ -241,6 +241,13 @@ conf["X_PLANE"]=0  # Defines the plane within which we restrict the robot
 
 
 
+conf["COMEDI_DEVICE"]='/dev/comedi0'
+conf["COMEDI_RANGE"] =0 # the index of the measurement range to use (we'll just use the largest range)
+
+
+
+
+
 def draw_item(screen,item, (y,z)):   ##### DEPRECATED #######n
     """ Draw a particular item (target or cursor) on the screen at the given (y,z) position. """
     if item=="target-nogo": # The cursor prior to the go signal
@@ -867,7 +874,7 @@ def init_comedi():
     ## Okay, now also load the sensor reading
     ##
     #open a comedi device
-    conf["comedi.dev"] =comedi.comedi_open('/dev/comedi0')
+    conf["comedi.dev"] =comedi.comedi_open(conf['COMEDI_DEVICE'])
     if not conf["comedi.dev"]: raise Exception("Error opening Comedi device") # This can happen if you do not have sufficient read privileges to /dev/comedi0, try running with sudo
     
     #get a file-descriptor for use later
@@ -880,12 +887,12 @@ def init_comedi():
     subdevice=0 # no idea
     conf["comedi.subdev"]=subdevice
 
-    NCHANNEL=16  # how many channels we are reading (TODO)
+    NCHANNEL = 16  # how many channels we are reading (TODO)
 
     #three lists containing the chans, gains and referencing
     #the lists must all have the same length
     chans  = range(NCHANNEL);#[0,1,2,3]
-    gains  = [0]*NCHANNEL #[0,0,0,0]
+    gains  = [conf['COMEDI_RANGE']]*NCHANNEL #[0,0,0,0]   # This defines the measurement range. This is device dependent, and we checked that this means -10 V to +10 V.
     aref   = [comedi.AREF_GROUND]*NCHANNEL #, c.AREF_GROUND, c.AREF_GROUND, c.AREF_GROUND]
     nchans = NCHANNEL #len(chans) #number of channels
 
@@ -909,6 +916,14 @@ def init_comedi():
     prepare_cmd(conf["comedi.dev"],subdevice,cmd,conf["comedi.freq"],nchans,mylist)
     conf["comedi.cmd"]=cmd
 
+
+    ## Get the maximum data value -- we have checked that this is the same for all channels actually
+    conf['comedi.maxdata'] = comedi.comedi_get_maxdata(conf['comedi.dev'],subdevice,0)
+
+    ## The measurement range we use
+    conf['comedi.range'] = comedi.comedi_get_range(conf['comedi.dev'],subdevice,0,conf["COMEDI_RANGE"])
+    #print([ (rng.min,rng.max) for rng in ranges])
+    
 
 
 
@@ -985,16 +1000,19 @@ def comedi_stop_record(fname):
     back  = 0  # always read from the beginning of the buffer (assumes that we clear the buffer at the beginning of each trial)
     front = comedi.comedi_get_buffer_contents(conf["comedi.dev"],conf["comedi.subdev"])
 
-    DATA = array.array("H") # reset array to empty    
+    DATA = array.array("H") # create an empty array with integer data type
 
     conf["comedi.map"].seek(back%conf["comedi.size"])
     for i in range(back,front,2):
 	DATA.fromstring(conf["comedi.map"].read(2))
 	if conf["comedi.map"].tell() == conf["comedi.size"]:
 	    conf["comedi.map"].seek(0)
+
+    # Convert to physical units (volts)
+    phydata = np.array([ comedi.comedi_to_phys(d, conf['comedi.range'], conf['comedi.maxdata']) for d in DATA ])
             
     of = open(fname,"wb")
-    DATA.tofile(of) # append data to log file
+    phydata.tofile(of) # append data to log file
     of.flush()
     of.close()
 
@@ -1031,6 +1049,34 @@ def end_program():
 
 
 
+
+
+
+def force_sensor_calibration():
+    """ Calibrate the force sensor """
+
+    capture_notholding_fname = conf["basename"]+"_bias_notholding.bin"
+    capture_holding_fname    = conf["basename"]+"_bias_holding.bin"
+
+    
+    tkMessageBox.showinfo("F/T calibration", "We will now perform the force sensor calibration.\nAsk the subject to RELEASE the handle and then press OK to start capture.")
+    init_comedi()
+    comedi_start_record() # start recording, clear buffer
+    time.sleep(3) # 3 seconds of data?
+    comedi_stop_record(capture_notholding_fname)
+    comedi_unload()
+
+    tkMessageBox.showinfo("F/T calibration", "Ok nice!\nNow we will capture the bias when the subject is holding the handle.\n\nAsk the subject to HOLD the handle and then press OK to start capture.")
+    init_comedi()
+    comedi_start_record() # start recording, clear buffer
+    time.sleep(3) # 3 seconds of data?
+    comedi_stop_record(capture_holding_fname)
+    comedi_unload()
+    
+    tkMessageBox.showinfo("Starting experiment", "Done calibration. We will now start the actual experiment.")
+    
+
+    
 
 
 def decide_timing(trialdata):
@@ -1106,6 +1152,12 @@ def run():
     experiment.inputs = robot
 
 
+    # Calibration of the force sensor
+    force_sensor_calibration()
+
+
+
+    
     print("Running the experiment.")
     gui["running"]=True
     update_ui()
