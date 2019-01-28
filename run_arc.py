@@ -243,7 +243,7 @@ conf["X_PLANE"]=0  # Defines the plane within which we restrict the robot
 
 conf["COMEDI_DEVICE"]='/dev/comedi0'
 conf["COMEDI_RANGE"] =0 # the index of the measurement range to use (we'll just use the largest range)
-
+conf['COMEDI_NCHANNEL']=16 # how many channels to read
 
 
 
@@ -551,8 +551,6 @@ def finish_trial(experiment,trialdata):
                                 'n.reset'     :trialdata["n.reset"],
                                 "capture.t"   :time.time()})
 
-    comedi_unload()
-    
     # Dump everything we have captured so far to a pickle
     #pickle.dump(traj,open('data/_tmp_trial%i.pickle'%trialdata["trial.number"],'wb'))
     #pickle.dump(experiment.captured,open(experiment.capturelog,'wb'))
@@ -720,7 +718,7 @@ def init_logs(experiment,conf):
     obsvlog    = '%sobservations.txt'%basename
 
     triallog = open('%strials.txt'%basename,'w')
-    triallog.write('participant experiment trial force.channel target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration\n')
+    triallog.write('participant experiment trial force.channel target.x target.y t.go t.movestart t.target.enter t.trial.end timing timing.numeric duration t.comedi.start t.comedi.stop\n')
 
 
     conflog = open('%sparameters.json'%basename,'w')
@@ -783,6 +781,8 @@ def triallog(experiment,trialdata):
         (trialdata["timing"],               's'),
         (timing_number[trialdata["timing"]],'i'),
         (trialdata["duration"],             'f'),
+        (trialdata['comedi.start'],         'f'),
+        (trialdata['comedi.stop'],          'f'),
         ]))
 
     experiment.triallog.flush()
@@ -887,7 +887,7 @@ def init_comedi():
     subdevice=0 # no idea
     conf["comedi.subdev"]=subdevice
 
-    NCHANNEL = 16  # how many channels we are reading (TODO)
+    NCHANNEL = conf['COMEDI_NCHANNEL']  # how many channels we are reading (TODO)
 
     #three lists containing the chans, gains and referencing
     #the lists must all have the same length
@@ -1018,8 +1018,13 @@ def comedi_stop_record(fname):
 
     ## 	time.sleep(.01)
     ret = comedi.comedi_mark_buffer_read(conf["comedi.dev"],conf["comedi.subdev"],front-back)
-    print("Read %d bytes from COMEDI"%(front-back))
-    return []
+    nsamp = len(phydata)
+    print("Read %d bytes from COMEDI, %d samples, equivalent to %f sec"%(
+        front-back,
+        nsamp,
+        nsamp/float(conf['COMEDI_NCHANNEL']*conf['comedi.freq'])
+    ))
+    return phydata
 
 
     
@@ -1261,6 +1266,7 @@ def run():
                 else:
                     print("Go!")
                     comedi_start_record() # start recording, clear buffer
+                    trialdata['comedi.start']=time.time()-experiment.first_trigger_t()
                     trialdata['next.phase']='active' # go! start showing the cursor and let's move
                     if not trialdata["force.channel"]: # if this is a normal trial (no channel trial) then here we release the handle
                         robot.three_d_to_two_d(conf["X_PLANE"])
@@ -1319,6 +1325,8 @@ def run():
                     else:
                         trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
 			comedi_stop_record(trialdata["force_filename"])
+                        trialdata['comedi.stop']=time.time()-experiment.first_trigger_t()
+                        comedi_unload()
                     redraw = True
 
 
@@ -1343,7 +1351,8 @@ def run():
 
                                 #if trialdata["force.channel"]:
 			        comedi_stop_record(trialdata["force_filename"])
-                                
+                                trialdata['comedi.stop']=time.time()-experiment.first_trigger_t()
+                                comedi_unload()
                                 finish_trial(experiment,trialdata)
 
 
