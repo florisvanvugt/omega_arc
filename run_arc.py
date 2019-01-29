@@ -544,10 +544,11 @@ def finish_trial(experiment,trialdata):
     # such as logging the trial-level data.
     print("Trial ended. Timing %s"%trialdata["timing"])
     print("")
-    traj = robot.stop_capture(True)
+    capt = robot.stop_capture(True)
 
     experiment.captured.append({"trial"       :trialdata["trial.number"],
-                                "trajectory"  :traj,
+                                "trajectory"  :capt["traj"],
+                                "ft"          :capt["ft"],
                                 'n.reset'     :trialdata["n.reset"],
                                 "capture.t"   :time.time()})
 
@@ -637,7 +638,7 @@ def start_new_trial(experiment,trialdata,dont_swap=False):
         print ("\n\n## Starting trial #%i"%trialdata["trial.number"])
         #robot.wshm('fvv_trial_no',trialn)
         
-        init_comedi()
+        #init_comedi()
 
         # Decide the movement direction for this trial (should be opposite of that of the previous trial)
         if dont_swap:
@@ -1046,7 +1047,7 @@ def end_program():
     experiment.keep_going = False
     if gui['loaded']:
         robot.unload()
-        comedi_unload()
+        ##comedi_unload()
         gui["loaded"]=False
 
     ending()
@@ -1063,20 +1064,23 @@ def force_sensor_calibration():
     capture_notholding_fname = conf["basename"]+"_bias_notholding.bin"
     capture_holding_fname    = conf["basename"]+"_bias_holding.bin"
 
+    def capture_data(t,fname):
+        """ Capture data for some seconds and save the results to a file."""
+        robot.start_capture()
+        time.sleep(t)
+        capt = robot.stop_capture(True)
+        #traj = capt["traj"]
+        #ft   = capt["ft"]
+        pickle.dump(capt,open(fname,'wb'))
+    
     
     tkMessageBox.showinfo("F/T calibration", "We will now perform the force sensor calibration.\nAsk the subject to RELEASE the handle and then press OK to start capture.")
-    init_comedi()
-    comedi_start_record() # start recording, clear buffer
-    time.sleep(3) # 3 seconds of data?
-    comedi_stop_record(capture_notholding_fname)
-    comedi_unload()
+    capture_data(3,capture_notholding_fname)
+    
 
     tkMessageBox.showinfo("F/T calibration", "Ok nice!\nNow we will capture the bias when the subject is holding the handle.\n\nAsk the subject to HOLD the handle and then press OK to start capture.")
-    init_comedi()
-    comedi_start_record() # start recording, clear buffer
-    time.sleep(3) # 3 seconds of data?
-    comedi_stop_record(capture_holding_fname)
-    comedi_unload()
+    capture_data(3,capture_holding_fname)
+
     
     tkMessageBox.showinfo("Starting experiment", "Done calibration. We will now start the actual experiment.")
     
@@ -1265,7 +1269,7 @@ def run():
                     reset_trial(experiment,trialdata,trialdata["t.current"])
                 else:
                     print("Go!")
-                    comedi_start_record() # start recording, clear buffer
+                    #comedi_start_record() # start recording, clear buffer
                     trialdata['comedi.start']=time.time()-experiment.first_trigger_t()
                     trialdata['next.phase']='active' # go! start showing the cursor and let's move
                     if not trialdata["force.channel"]: # if this is a normal trial (no channel trial) then here we release the handle
@@ -1324,9 +1328,9 @@ def run():
                         trialdata["t.trial.finish"] = np.inf;
                     else:
                         trialdata["t.trial.finish"] = trialdata["t.movestart"] + conf["MAX_TRIAL_TIME"]
-			comedi_stop_record(trialdata["force_filename"])
+			#comedi_stop_record(trialdata["force_filename"])
                         trialdata['comedi.stop']=time.time()-experiment.first_trigger_t()
-                        comedi_unload()
+                        #comedi_unload()
                     redraw = True
 
 
@@ -1350,9 +1354,9 @@ def run():
                                 robot.stay()
 
                                 #if trialdata["force.channel"]:
-			        comedi_stop_record(trialdata["force_filename"])
+			        #comedi_stop_record(trialdata["force_filename"])
                                 trialdata['comedi.stop']=time.time()-experiment.first_trigger_t()
-                                comedi_unload()
+                                #comedi_unload()
                                 finish_trial(experiment,trialdata)
 
 
