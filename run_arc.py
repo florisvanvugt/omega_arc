@@ -313,6 +313,59 @@ def draw_arc(surface,col=conf["ARC_COLOUR"]): #,horizontal_flip=False):
 
 
 
+HALF_ARCS = [ (conf["ARC_BASE_X"]-conf["ARC_RADIUS_1"],conf["ARC_BASE_Y"],conf["ARC_RADIUS_1"],True),
+              (conf["ARC_BASE_X"]+conf["ARC_RADIUS_2"],conf["ARC_BASE_Y"],conf["ARC_RADIUS_2"],False) ]
+    
+
+def dist_to_arc(pos,arc):
+    """ Given a position and half-circle arc, find the closest point on the arc
+    from the given position and return that point as well as the distance. """
+
+    (x,y) = pos
+    (cx,cy,rad,upper) = arc
+
+    # Find whether we are on the "right" side of the arc
+    if (upper and y>cy) or ((not upper) and y<cy):
+
+
+        # Compute the vector V from the center of the arc to the current point
+        dx,dy = x-cx,y-cy
+
+        # Find the magnitude of that vector
+        magV = np.sqrt(pow(dx,2)+pow(dy,2))
+
+        # The distance to the arc is then...
+        dist = abs(magV-rad)
+
+        # Now to find the closest point itself, just take the unit vector of V and multiply by the radius
+        px = cx+ (dx/magV)*rad
+        py = cy+ (dy/magV)*rad
+        
+        return (dist,(px,py))
+        
+    else:
+
+        edges = [ (cx-rad,cy), (cx+rad,cy) ]
+        dists = [ np.sqrt(pow(ex-x,2)+pow(ey-y,2)) for (ex,ey) in edges ]
+        i = np.argmin(dists)
+        return (dists[i],edges[i])
+
+    
+    
+
+def snap_to_arc(pos):
+    """ Given a position somewhere in the workspace, in robot coordinates,
+    find the closest position on the arc, and return that. """
+
+    dist,closest = zip(*[ dist_to_arc(pos,arc) for arc in HALF_ARCS ])
+    i = np.argmin(dist)
+    return closest[i]
+
+
+
+    
+
+
 
 def draw_ball(surface,pos,colour):
     """
@@ -441,7 +494,8 @@ def draw_positions(experiment,trialdata):
             # Now draw the history of previous positions
             if len(trialdata["cursor.history"])>1 and (conf["SHOW_ONLINE_TRAJECTORY"] or trialdata["phase"]=="feedback"):
                 #history = [ robot_to_screen(py,pz,conf) for (py,pz,_) in trialdata["position.history"] ]
-                pygame.draw.lines(experiment.screen,col,False,trialdata["cursor.history"],conf["HISTORY_LINE_WIDTH"])
+                positions = trialdata["cursor.history"] # if not trialdata['force.channel'] else [ snap_to_arc(p) for p in trialdata['cursor.history'] ]
+                pygame.draw.lines(experiment.screen,col,False,positions,conf["HISTORY_LINE_WIDTH"])
 
                 #(oy,oz) = history[0] #,_) = trialdata["position.history"][0]
                 #for (y,z) in history[1:]: #trialdata["position.history"][1:]:
@@ -449,14 +503,15 @@ def draw_positions(experiment,trialdata):
                 #    (oy,oz) = (y,z)
 
 
-        # showing the cursor
+        # showing the cursor for the current position
         if trialdata["phase"] in ["active","feedback"]:
 
             if trialdata["t.current"]>trialdata["t.go"]:
                 # Draw cursor at current position
                 #if trialdata["t.current"]>=trialdata["t.start"]+trialdata["t.go"]:
                 #draw_item(experiment.screen,"cursor",trialdata["cursor.position"])
-                draw_cursor(experiment.screen,trialdata["cursor.position"])
+                pos = trialdata['cursor.position'] if not trialdata['force.channel'] else snap_to_arc(trialdata['cursor.position'])
+                draw_cursor(experiment.screen,pos)
 
     else: # i.e. if not experiment.visualfb
 
@@ -486,6 +541,9 @@ def update_position(trialdata,(ry,rz),conf):
     if not np.isnan(ry) and not np.isnan(rz):
         if trialdata["phase"]=="active":
 
+            if trialdata['force.channel']:
+                ry,rz = snap_to_arc((ry,rz))
+                
             sy,sz = robot_to_screen(ry,rz,conf)
 
             # First check whether we actually want to add anything - because we may
@@ -496,6 +554,7 @@ def update_position(trialdata,(ry,rz),conf):
                 if oy==sy and oz==sz: addthis=False
 
             if addthis:
+                
                 trialdata["cursor.history"].append((sy,sz))
 
     return
